@@ -1,0 +1,72 @@
+# Core Dependencies
+livekit
+livekit-agents
+livekit-plugins-google
+python-dotenv
+requests
+langchain-community
+yfinance
+psutil
+speedtest-cli
+qrcode[pil]
+aiohttp
+
+# New Advanced Features Dependencies
+matplotlib
+seaborn
+numpy
+pandas
+googletrans==3.1.0a0
+opencv-python
+face-recognition
+sounddevice
+soundfile
+wikipedia
+PyAutoGUI
+schedule
+cryptography
+Pillow
+pytz
+
+# Additional Dependencies for Enhanced Features
+plotly
+scikit-learn
+nltk
+spacy
+beautifulsoup4
+selenium
+pycryptodome
+python-magic
+textstat
+wordcloud
+transformers
+torch
+torchvision
+flask
+fastapi
+uvicorn
+streamlit
+
+# Development and Testing
+pytest
+black
+flake8
+mypy
+jupyter
+ipython
+
+# Optional Dependencies for Extended Functionality
+discord.py
+python-telegram-bot
+slack-sdk
+notion-client
+trello-py
+todoist-api-python
+openai
+anthropic
+google-cloud-speech
+azure-cognitiveservices-speech
+aws-sdk-python
+
+
+# python .\agent.py dev
