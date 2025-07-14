@@ -16,7 +16,6 @@ matplotlib
 seaborn
 numpy
 pandas
-googletrans==3.1.0a0
 opencv-python
 face-recognition
 sounddevice
@@ -59,14 +58,14 @@ ipython
 discord.py
 python-telegram-bot
 slack-sdk
-notion-client
+notion-client==0.3.0
 trello-py
 todoist-api-python
 openai
 anthropic
 google-cloud-speech
 azure-cognitiveservices-speech
-aws-sdk-python
+boto3
 
 
 # python .\agent.py dev

@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+
 from livekit import agents
 from livekit.agents import AgentSession, Agent, RoomInputOptions
 from livekit.plugins import (
@@ -61,9 +62,9 @@ class FridayAssistant(Agent):
                 random_fact,
                 
                 # 15 Advanced Features
-                create_mindmap,           # Visual mind mapping
-                voice_memo_recorder,      # Voice recording and transcription
-                password_generator,       # Secure password generation
+                create_mindmap,          # Visual mind mapping
+                voice_memo_recorder,     # Voice recording and transcription
+                password_generator,      # Secure password generation
                 data_visualizer,         # Data visualization and charts
                 translate_text,          # Multi-language translation
                 habit_tracker,           # Personal habit tracking

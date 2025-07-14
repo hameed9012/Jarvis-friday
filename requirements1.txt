@@ -1,0 +1,7 @@
+livekit-agents==1.0.11
+livekit-plugins-google==1.0.11
+livekit-plugins-silero==1.0.11
+livekit-plugins-openai==1.0.11
+livekit-plugins-noise-cancellation==1.0.11
+requests==2.26.0
+python-dotenv==1.0.1
