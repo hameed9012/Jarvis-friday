@@ -67,5 +67,13 @@ google-cloud-speech
 azure-cognitiveservices-speech
 boto3
 
-
+# venv\Scripts\activate
 # python .\agent.py dev
+# For later pushes (after the first one):
+# git push
+
+# Optional: Check the status of your repository
+# git status
+
+# Optional: View commit history
+# git log

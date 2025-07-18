@@ -7,7 +7,7 @@ from email.mime.text import MIMEText
 from typing import Optional, Dict, List
 import datetime
 import json
-from livekit.agents.llm.tool_context import function_tool # Corrected import for the tool decorator
+from livekit.agents.llm.tool_context import function_tool
 import asyncio
 import socket
 import aiohttp
@@ -19,10 +19,14 @@ import speedtest
 import qrcode
 import io
 import base64
+import datetime
+import sqlite3 # Keep sqlite3 for other tools if they use it, but not for memory
+import logging
+from livekit.agents.llm.tool_context import function_tool
 import random
 import hashlib
 import uuid
-import sqlite3
+# Removed redundant sqlite3 import if it was already there
 from PIL import Image, ImageDraw, ImageFont
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -42,11 +46,133 @@ from cryptography.fernet import Fernet
 import zipfile
 import shutil
 import tempfile
-# Assuming DuckDuckGoSearchRun is from langchain_community.tools
 from langchain_community.tools import DuckDuckGoSearchRun
-from langchain.agents import Tool # Keeping this if you are using langchain.agents.Tool elsewhere directly
+from langchain.agents import Tool
+import os
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
+from livekit.agents.llm.tool_context import function_tool
+TEMP_OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output_media")
+os.makedirs(TEMP_OUTPUT_DIR, exist_ok=True)
+from dotenv import load_dotenv
+load_dotenv()
 
-# Original Enhanced Tools
+# --- Firebase Imports for Contextual Memory ---
+import firebase_admin
+from firebase_admin import credentials, firestore
+
+# --- Global Firebase Initialization ---
+db = None # Initialize db to None
+try:
+    firebase_credentials_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_KEY_PATH")
+    if not firebase_credentials_path or not os.path.exists(firebase_credentials_path):
+        logging.error("FIREBASE_SERVICE_ACCOUNT_KEY_PATH environment variable not set or file not found.")
+        # If Firebase is mandatory for your application, consider raising an exception here.
+        # For now, we'll log an error and allow the app to run without memory features.
+        raise FileNotFoundError("Firebase service account key file not found or path not set in .env.")
+
+    cred = credentials.Certificate(firebase_credentials_path)
+    if not firebase_admin._apps: # Initialize Firebase app only once
+        firebase_admin.initialize_app(cred)
+    db = firestore.client()
+    logging.info("Firebase Firestore initialized successfully.")
+except Exception as e:
+    logging.error(f"Failed to initialize Firebase: {e}. Memory features will be unavailable.")
+    db = None # Ensure db is None if initialization fails
+
+
+# --- Global Spotify Configuration ---
+SPOTIFY_SCOPE = "user-read-playback-state user-modify-playback-state user-read-currently-playing"
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIPY_CLIENT_ID")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIPY_CLIENT_SECRET")
+SPOTIFY_REDIRECT_URI = os.getenv("SPOTIPY_REDIRECT_URI")
+
+# Initialize SpotifyOAuth once globally, configured to use cache and not open browser
+sp_oauth = SpotifyOAuth(
+    client_id=SPOTIFY_CLIENT_ID,
+    client_secret=SPOTIFY_CLIENT_SECRET,
+    redirect_uri=SPOTIFY_REDIRECT_URI,
+    scope=SPOTIFY_SCOPE,
+    open_browser=False,
+    cache_path=".spotify_cache"
+)
+sp = spotipy.Spotify(auth_manager=sp_oauth)
+
+
+# --- Contextual Memory Manager Class (Firestore Version) ---
+class MemoryManager:
+    def __init__(self, firestore_db):
+        self.db = firestore_db
+        if not self.db:
+            logging.warning("Firestore DB not initialized. Memory features will be unavailable.")
+
+    def log_interaction(self, session_id: str, role: str, content: str):
+        if not self.db:
+            logging.error("Cannot log interaction: Firestore DB not available.")
+            return
+
+        try:
+            # Each session is a document, with messages as a subcollection
+            session_ref = self.db.collection('sessions').document(session_id).collection('messages')
+            session_ref.add({
+                'role': role,
+                'content': content,
+                'timestamp': firestore.SERVER_TIMESTAMP # Use server timestamp for consistency
+            })
+            logging.info(f"Logged interaction for session {session_id}: {role} - {content[:50]}...")
+        except Exception as e:
+            logging.error(f"Error logging interaction to Firestore: {e}")
+
+    def get_recent_history(self, session_id: str, limit: int = 5) -> List[Dict]:
+        if not self.db:
+            logging.error("Cannot retrieve history: Firestore DB not available.")
+            return []
+
+        history = []
+        try:
+            messages_ref = self.db.collection('sessions').document(session_id).collection('messages')
+            query = messages_ref.order_by('timestamp', direction=firestore.Query.DESCENDING).limit(limit)
+            
+            docs = query.stream()
+            for doc in docs:
+                data = doc.to_dict()
+                # Convert Firestore Timestamp object to string for easier use in prompt
+                timestamp_str = data.get('timestamp').isoformat() if data.get('timestamp') else None
+                history.append({
+                    "role": data.get('role'),
+                    "content": data.get('content'),
+                    "timestamp": timestamp_str
+                })
+            # Reverse to get chronological order (oldest first)
+            history.reverse()
+            logging.info(f"Retrieved {len(history)} history items for session {session_id}.")
+        except Exception as e:
+            logging.error(f"Error retrieving history from Firestore: {e}")
+        return history
+
+# Instantiate the MemoryManager globally, passing the initialized Firestore client
+# This ensures memory_manager is available to other tools and agent.
+memory_manager = MemoryManager(db)
+
+
+# --- New Tool for Logging Interactions (to be called by agent) ---
+@function_tool(description="Log a conversation interaction for contextual memory. Takes 'session_id' (string), 'role' ('user' ('user') or 'friday' ('friday')), and 'content' (string).")
+async def log_interaction(session_id: str, role: str, content: str) -> str:
+    """
+    Logs a conversation interaction to the contextual memory database.
+    """
+    try:
+        memory_manager.log_interaction(session_id, role, content)
+        return "Interaction logged successfully, sir."
+    except Exception as e:
+        logging.error(f"Failed to log interaction: {e}")
+        return f"Failed to log interaction, sir: {e}"
+
+
+# Original Enhanced Tools (rest of your tools.py content goes here)
+# ... (all your existing tools like get_weather, search_web, send_email, etc.) ...
+# Ensure these are still present in your file.
+
 @function_tool(description="Get detailed weather information for a given city. Takes 'city' (string) as a required argument and 'units' (string, 'metric' or 'imperial') as an optional argument. Example: get_weather('London', units='metric')")
 async def get_weather(
     city: str,
@@ -135,6 +261,7 @@ async def send_email(
 
         if priority.lower() == "high":
             msg["X-Priority"] = "1"
+            msg["X-MSMail-Priority"] = "High"
             msg["X-MSMail-Priority"] = "High"
         elif priority.lower() == "low":
             msg["X-Priority"] = "5"
@@ -779,25 +906,26 @@ async def crypto_tracker(
 
     except Exception as e:
         logging.error(f"Error with crypto tracker: {e}")
-        return "Cryptocurrency tracking failed, sir."
+        return "Cryptocurrency tracking failed, sir." 
 
-@function_tool(description="Manage calendar events with smart scheduling.")
+@function_tool(description="Manage calendar events with smart scheduling. Actions include 'add' (requires event_title, event_date YYYY-MM-DD, event_time HH:MM), 'list' (lists events for a specific date, requires event_date YYYY-MM-DD), and 'upcoming' (lists up to 5 upcoming events).")
 async def smart_calendar(
     action: str,
     event_title: str = "",
-    event_date: str = "",
+    event_date: str = "", # This will be used for specific date listing
     event_time: str = "") -> str:
     """
     Manage calendar events with smart scheduling.
 
     Args:
-        action: Action to perform (add, list, upcoming, conflicts)
-        event_title: Title of the event
-        event_date: Date in YYYY-MM-DD format
-        event_time: Time in HH:MM format
+        action: Action to perform (add, list, upcoming)
+        event_title: Title of the event (for 'add' action)
+        event_date: Date in YYYY-MM-DD format (for 'add' and 'list' actions)
+        event_time: Time in HH:MM format (for 'add' action)
     """
+    db_path = "calendar.db"
+    conn = None # Initialize conn to None
     try:
-        db_path = "calendar.db"
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
 
@@ -805,22 +933,57 @@ async def smart_calendar(
             CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY,
                 title TEXT,
-                date DATE,
-                time TIME,
+                date TEXT, -- Changed to TEXT to avoid SQLite's implicit conversions
+                time TEXT, -- Changed to TEXT
                 created_at TIMESTAMP
             )
         ''')
 
         if action == "add":
+            if not event_title or not event_date or not event_time:
+                return "Please provide a title, date (YYYY-MM-DD), and time (HH:MM) to add an event, sir."
+
+            try:
+                # Validate and normalize date/time to ensure consistent format
+                parsed_date = datetime.datetime.strptime(event_date, "%Y-%m-%d").strftime("%Y-%m-%d")
+                parsed_time = datetime.datetime.strptime(event_time, "%H:%M").strftime("%H:%M")
+            except ValueError:
+                return "Invalid date or time format. Please use YYYY-MM-DD for date and HH:MM for time, sir."
+
             cursor.execute('''
                 INSERT INTO events (title, date, time, created_at)
                 VALUES (?, ?, ?, ?)
-            ''', (event_title, event_date, event_time, datetime.datetime.now()))
+            ''', (event_title, parsed_date, parsed_time, datetime.datetime.now()))
 
-            conn.commit()
-            conn.close()
+            conn.commit() # Commit changes immediately after insertion
+            return f"Event '{event_title}' added for {parsed_date} at {parsed_time}, sir."
 
-            return f"Event '{event_title}' added for {event_date} at {event_time}, sir."
+        elif action == "list":
+            if not event_date:
+                return "Please provide a date (YYYY-MM-DD) to list events, sir."
+
+            try:
+                # Validate and normalize date for querying
+                parsed_date = datetime.datetime.strptime(event_date, "%Y-%m-%d").strftime("%Y-%m-%d")
+            except ValueError:
+                return "Invalid date format. Please use YYYY-MM-DD for date, sir."
+
+            cursor.execute('''
+                SELECT title, date, time
+                FROM events
+                WHERE date = ?
+                ORDER BY time
+            ''', (parsed_date,)) # Use the parsed_date for consistency
+
+            results = cursor.fetchall()
+
+            if results:
+                events_list = f"Events on {parsed_date}:\n"
+                for title, date, time in results:
+                    events_list += f"- {title}: {time}\n"
+                return events_list + "sir."
+            else:
+                return f"No events found on {parsed_date}, sir."
 
         elif action == "upcoming":
             cursor.execute('''
@@ -838,16 +1001,20 @@ async def smart_calendar(
                 for title, date, time in results:
                     events_list += f"- {title}: {date} at {time}\n"
 
-                conn.close()
                 return events_list + "sir."
             else:
                 return "No upcoming events, sir."
 
-        conn.close()
+        else:
+            return "Invalid action for calendar. Please use 'add', 'list', or 'upcoming', sir."
+
     except Exception as e:
         logging.error(f"Error with smart calendar: {e}")
         return "Calendar management failed, sir."
-
+    finally:
+        if conn:
+            conn.close() # Ensure the connection is always closed    
+            
 @function_tool(description="Generate various types of content using AI assistance.")
 async def ai_content_generator(
     content_type: str,
@@ -976,13 +1143,6 @@ async def system_stats() -> str:
 async def generate_qr_code(
     data: str,
     size: int = 10) -> str:
-    """
-    Generate a QR code for given data.
-
-    Args:
-        data: Data to encode in QR code
-        size: Size of the QR code (1-40)
-    """
     try:
         qr = qrcode.QRCode(
             version=1,
@@ -994,12 +1154,10 @@ async def generate_qr_code(
         qr.make(fit=True)
 
         img = qr.make_image(fill_color="black", back_color="white")
+        filename = os.path.join(TEMP_OUTPUT_DIR, f"qr_{hashlib.md5(data.encode()).hexdigest()[:6]}.png")
+        img.save(filename)
 
-        img_buffer = io.BytesIO()
-        img.save(img_buffer, format='PNG')
-        img_str = base64.b64encode(img_buffer.getvalue()).decode()
-
-        return f"QR code generated for: {data[:50]}{'...' if len(data) > 50 else ''}"
+        return f"QR code generated and saved as: {filename}, sir."
     except Exception as e:
         logging.error(f"Error generating QR code: {e}")
         return "QR code generation failed, sir."
@@ -1049,3 +1207,93 @@ async def random_fact() -> str:
     except Exception as e:
         logging.error(f"Error getting random fact: {e}")
         return "Fact database unavailable, sir."
+
+
+@function_tool(description="Control your Spotify music player. Actions: play, pause, next, previous, shuffle, repeat, status. For 'play' action, 'query' (song name) is optional to play a specific song, otherwise it resumes. Shuffle can be True/False. Repeat can be 'track', 'context', or 'off'.")
+async def spotify_controller(
+    action: str = "status",
+    query: Optional[str] = None, # Added query for song search
+    shuffle: Optional[bool] = None, # Changed to Optional to handle default behavior better
+    repeat: Optional[str] = None  # Changed to Optional
+) -> str:
+    """
+    Control Spotify playback.
+
+    Args:
+        action: Action to perform (play, pause, next, previous, status)
+        query: Optional song name to play (for 'play' action)
+        shuffle: Enable shuffle (True/False)
+        repeat: Repeat mode (off/context/track)
+    """
+    try:
+        # Get active device
+        devices = sp.devices()
+        active_device_id = None
+        for device in devices['devices']:
+            if device['is_active']:
+                active_device_id = device['id']
+                break
+
+        if not active_device_id:
+            return "No active Spotify device found, sir. Please open and activate Spotify on a device."
+
+        # Apply shuffle state if provided
+        if shuffle is not None:
+            sp.shuffle(state=shuffle, device_id=active_device_id)
+
+        # Apply repeat state if provided and valid
+        if repeat in ["track", "context", "off"]:
+            sp.repeat(repeat, device_id=active_device_id)
+
+        if action == "play":
+            if query:
+                # Search for the track
+                results = sp.search(q=query, type='track', limit=1)
+                tracks = results['tracks']['items']
+                if not tracks:
+                    return f"Could not find any track named '{query}', sir."
+
+                track_uri = tracks[0]['uri']
+                track_name = tracks[0]['name']
+                artist_name = tracks[0]['artists'][0]['name']
+                sp.start_playback(device_id=active_device_id, uris=[track_uri])
+                return f"Playing '{track_name}' by {artist_name}, sir."
+            else:
+                # Resume playback
+                current_playback = sp.current_playback()
+                if current_playback and current_playback.get('actions', {}).get('disallows', {}).get('resuming'):
+                    return "Resuming playback is currently disallowed for the active track, sir. Please try playing a new song."
+                sp.start_playback(device_id=active_device_id)
+                return "Music resumed, sir."
+
+        elif action == "pause":
+            sp.pause_playback(device_id=active_device_id)
+            return "Music paused, sir."
+        elif action == "next":
+            sp.next_track(device_id=active_device_id)
+            return "Skipped to the next track, sir."
+        elif action == "previous":
+            sp.previous_track(device_id=active_device_id)
+            return "Returned to the previous track, sir."
+        elif action == "status":
+            current = sp.current_playback()
+            if not current or not current.get("is_playing"):
+                return "No music is currently playing, sir."
+            item = current["item"]
+            track_name = item["name"]
+            artists = ", ".join([artist["name"] for artist in item["artists"]])
+            progress_ms = current.get("progress_ms", 0)
+            duration_ms = item.get("duration_ms", 1)
+            percent = (progress_ms / duration_ms) * 100
+            return f"Currently playing: '{track_name}' by {artists} ({percent:.1f}% complete), sir."
+        else:
+            return "Invalid action for Spotify, sir."
+
+    except spotipy.exceptions.SpotifyException as e:
+        if e.http_status == 403:
+            return f"Spotify error: Permission denied or restriction violated, sir. This might be due to Spotify Free tier limitations or specific playback rules. Error details: {str(e)}"
+        elif e.http_status == 404:
+            return f"Spotify error: No active device found or device not available, sir. Please ensure your Spotify client is active and playing on a device. Error details: {str(e)}"
+        return f"Spotify API error: {str(e)}, sir."
+    except Exception as e:
+        return f"Spotify control failed, sir. A system anomaly occurred: {e}"
