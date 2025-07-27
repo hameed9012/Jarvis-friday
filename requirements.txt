@@ -77,3 +77,48 @@ boto3
 
 # Optional: View commit history
 # git log
+
+# ========================================
+# Git Push Steps: Push Local Changes to Repo
+# ========================================
+
+# 1. Open your terminal (or VS Code terminal)
+
+# 2. Navigate to your project folder
+# Example: cd path/to/your/project
+# cd C:/Users/YourName/Documents/my_project
+
+# 3. Initialize git in the folder if you haven’t already
+# git init
+
+# 4. Add your GitHub remote URL (only once per repo)
+# git remote add origin https://github.com/YourUsername/your-repo-name.git
+
+# 5. Check your remote to confirm it's set
+# git remote -v
+
+# 6. Stage all your changes
+# git add .
+
+# 7. Commit your changes with a message
+# git commit -m "Your commit message here"
+
+# 8. Push your changes to the main branch (or master)
+# git push origin main
+# If your branch is called "master", use:
+# git push origin master
+
+# 9. If this is your first push and branch doesn't exist on GitHub:
+# git push -u origin main
+
+# 10. Done! 🚀 Your code is now in your GitHub repo.
+
+# OPTIONAL TROUBLESHOOTING:
+# If you're asked for login or password:
+# Use your GitHub username and a personal access token instead of your password.
+# To create a token: Go to GitHub > Settings > Developer Settings > Personal Access Tokens.
+
+# ========================================
+# End of Git Push Steps
+# Save this file for later whenever you forget!
+# ========================================
