@@ -17,3 +17,7 @@ venv/
 # OS files
 .DS_Store
 Thumbs.db
+
+
+# firebase
+firebase_service_account.json
